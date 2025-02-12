@@ -4,6 +4,10 @@ const qrcode = require('qrcode-terminal');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+
+
+async function startBot() {
+  
 const fs = require('fs');
 const path = require('path');
 
@@ -14,9 +18,7 @@ if (fs.existsSync(sessionDir)) {
 }
 
 
-
-
-async function startBot() {
+  
   const { state, saveCreds } = await useMultiFileAuthState('sessions');
 
   const sock = makeWASocket({
