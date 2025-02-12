@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB configuration
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<user>:<password>@cluster.mongodb.net/whatsapp?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<user>:<password>@<CLUSTER-NAME>.mongodb.net/whatsapp?retryWrites=true&w=majority';
 
 async function startBot() {
   try {
