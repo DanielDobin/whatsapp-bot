@@ -12,13 +12,16 @@ async function startBot() {
     printQRInTerminal: false,
   });
 
-  sock.ev.on('connection.update', (update) => {
-    if (update.qr) {
-      qrcode.generate(update.qr, { small: true });
-      console.log(`QR code for pairing: ${update.qr}`);
-    }
-    if (update.connection === 'open') console.log('WhatsApp connected!');
-  });
+
+sock.ev.on('connection.update', (update) => {
+  if (update.qr) {
+    const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(update.qr)}&size=300&margin=20`;
+    console.log('Scan this QR code URL:', qrUrl);
+  }
+  if (update.connection === 'open') {
+    console.log('Connected to WhatsApp!');
+  }
+});
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -27,3 +30,5 @@ async function startBot() {
 }
 
 startBot().catch(console.error);
+
+
