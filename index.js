@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB configuration
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<db_user>:<db_password>@<db_name>.dxep6.mongodb.net/?retryWrites=true&w=majority&appName=<db_name>';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<db_user>:<db_password>@<db_name>.dxep6.mongodb.net/?retryWrites=true&w=majority&appName=<project_name>';
 
 async function startBot() {
   try {
