@@ -4,6 +4,18 @@ const qrcode = require('qrcode-terminal');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const fs = require('fs');
+const path = require('path');
+
+// Delete sessions folder on startup (for testing)
+const sessionDir = path.join(__dirname, 'sessions');
+if (fs.existsSync(sessionDir)) {
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+}
+
+
+
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('sessions');
 
