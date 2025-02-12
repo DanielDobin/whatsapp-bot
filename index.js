@@ -4,39 +4,41 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced logging setup
+// Custom logger with child method fix
 const logger = {
   info: (...args) => console.log('[INFO]', ...args),
   error: (...args) => console.error('[ERROR]', ...args),
-  debug: (...args) => console.debug('[DEBUG]', ...args)
+  warn: (...args) => console.warn('[WARN]', ...args),
+  debug: (...args) => console.debug('[DEBUG]', ...args),
+  child: () => logger // Critical fix for Baileys
 };
 
 async function startBot() {
   try {
-    logger.info('Starting WhatsApp bot...');
+    logger.info('Initializing WhatsApp bot...');
 
     // ================== MongoDB Connection ==================
-    const client = new MongoClient(process.env.MONGODB_URI, {
+    const mongoClient = new MongoClient(process.env.MONGODB_URI, {
       tls: true,
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 20000
     });
     
     logger.info('Connecting to MongoDB...');
-    await client.connect();
-    logger.info('✅ MongoDB connected');
-    const db = client.db('whatsapp-sessions');
+    await mongoClient.connect();
+    logger.info('✅ MongoDB connection established');
+    const db = mongoClient.db('whatsapp-sessions');
 
-    // ================== Session Management ==================
-    logger.info('Initializing session...');
+    // ================== Session Initialization ==================
+    logger.info('Loading session from MongoDB...');
     const { state, saveCreds } = await useMongoDBAuthState(db);
-    
+
     // ================== WhatsApp Connection ==================
     logger.info('Creating WhatsApp socket...');
     const sock = makeWASocket({
       auth: state,
-      printQRInTerminal: false,
       logger: logger,
+      printQRInTerminal: false,
       browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
       connectTimeoutMs: 30000,
       keepAliveIntervalMs: 25000,
@@ -46,16 +48,16 @@ async function startBot() {
 
     // ================== Event Handlers ==================
     sock.ev.on('connection.update', (update) => {
-      logger.debug('Connection update:', update);
+      logger.debug('Connection update:', JSON.stringify(update, null, 2));
       
       if (update.qr) {
-        const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(update.qr)}&size=400`;
-        logger.info(`🚨 SCAN THIS QR CODE: ${qrUrl}`);
-        logger.info(`QR Code Content: ${update.qr}`); // For manual scanning
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(update.qr)}`;
+        logger.info(`\n\n🚨 SCAN THIS QR CODE: ${qrUrl}\n`);
       }
       
       if (update.connection === 'open') {
-        logger.info('✅ WhatsApp connection established');
+        logger.info('✅ WhatsApp authentication successful');
+        logger.info('User ID:', state.creds.me?.id);
       }
       
       if (update.connection === 'close') {
@@ -65,23 +67,45 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+      try {
+        const msg = messages[0];
+        if (!msg.key.fromMe) {
+          logger.info(`📩 New message from ${msg.key.remoteJid}`);
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: 'Hello! This is an automated response.'
+          });
+        }
+      } catch (error) {
+        logger.error('Message handling error:', error);
+      }
+    });
+
     // ================== Web Server ==================
-    app.get('/', (req, res) => res.send('Bot is running'));
-    app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+    app.get('/', (req, res) => res.send('🤖 WhatsApp Bot Active'));
+    app.get('/health', (req, res) => res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      whatsapp: sock.connectionStatus()
+    }));
+
+    app.listen(PORT, () => {
+      logger.info(`🌐 Server listening on port ${PORT}`);
+    });
 
   } catch (error) {
-    logger.error('FATAL ERROR:', error);
+    logger.error('FATAL INITIALIZATION ERROR:', error);
     process.exit(1);
   }
 }
 
-// ================== MongoDB Auth Handler ==================
+// ================== MongoDB Session Handler ==================
 async function useMongoDBAuthState(db) {
   const collection = db.collection('sessions');
   
-  // Force new session for testing
-  await collection.deleteMany({}); // Remove this line after first successful connection
-  
+  // Initialize fresh session for testing
+  await collection.deleteMany({});
+
   const existingData = await collection.findOne({ _id: 'auth' }) || {};
 
   return {
@@ -97,9 +121,13 @@ async function useMongoDBAuthState(db) {
     saveCreds: async (creds) => {
       await collection.updateOne(
         { _id: 'auth' },
-        { $set: { creds, keys: this.state.keys } },
+        { $set: { 
+          creds,
+          keys: this.state.keys 
+        }},
         { upsert: true }
       );
+      logger.info('🔐 Session credentials updated in MongoDB');
     }
   };
 }
