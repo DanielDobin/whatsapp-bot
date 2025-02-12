@@ -1,65 +1,73 @@
-const { makeWASocket, initAuthCreds, useMultiFileAuthState } = require('@whiskeysockets/baileys');
-const { MongoClient } = require('mongodb');
+const { makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Use WhatsApp-approved browser configuration
-const BROWSER_CONFIG = ['Ubuntu', 'Chrome', '122.0.0.0'];
-const WA_VERSION = [2, 2413, 1];
-
-async function initMongoDB() {
-  const client = new MongoClient(process.env.MONGODB_URI, {
-    tls: true,
-    serverSelectionTimeoutMS: 15000,
-    socketTimeoutMS: 30000
-  });
-  await client.connect();
-  return client.db('whatsapp_prod');
+// 1. Session Configuration
+const sessionFolder = path.join(__dirname, 'session');
+if (!fs.existsSync(sessionFolder)) {
+  fs.mkdirSync(sessionFolder);
 }
 
-async function createWhatsAppSession(db) {
-  // Initialize fresh session
-  const { state, saveCreds } = await useMultiFileAuthState('sessions');
-  
+// 2. WhatsApp Connection Setup
+async function startWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+
   const sock = makeWASocket({
     auth: state,
-    version: WA_VERSION,
-    browser: BROWSER_CONFIG,
-    printQRInTerminal: true,
+    printQRInTerminal: false,
+    browser: ['Chrome', 'Linux', '120.0.0.0'],
+    version: [2, 2412, 12],
     syncFullHistory: false,
     shouldIgnoreJid: () => false,
     generateInitialPreKeys: 5,
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 30000
+    keepAliveIntervalMs: 20000
   });
 
-  // QR Code Handler
+  // 3. QR Code Handler
   sock.ev.on('connection.update', (update) => {
     if (update.qr) {
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
-      console.log(`\n\n🌐 SCAN QR CODE: ${qrUrl}\n`);
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
+      const qrTerminal = `
+        █▀▀▀▀▀█ ▀▀ █ █▀▀▀▀▀█
+        █ ███ █ ▀█ ▀ █ ███ █
+        █ ▀▀▀ █ ▄▀ █ █ ▀▀▀ █
+        ▀▀▀▀▀▀▀ ▀ █ ▀ ▀▀▀▀▀▀▀
+        ${update.qr}
+      `;
+      console.log(`\n🌐 Scan QR: ${qrImageUrl}`);
+      console.log(`\n📲 Raw QR Data:\n${qrTerminal}`);
+    }
+    
+    if (update.connection === 'open') {
+      console.log('✅ WhatsApp connected!');
+      sock.ev.off('connection.update', this);
     }
   });
 
-  // Session Persistence
+  // 4. Session Save Handler
   sock.ev.on('creds.update', saveCreds);
+
+  // 5. Error Handling
+  sock.ev.on('connection.update', (update) => {
+    if (update.connection === 'close') {
+      console.log('Connection closed:', update.lastDisconnect?.error);
+      startWhatsApp(); // Auto-reconnect
+    }
+  });
+
   return sock;
 }
 
-// Main Application
-async function bootstrap() {
-  try {
-    const db = await initMongoDB();
-    const sock = await createWhatsAppSession(db);
-    
-    app.get('/', (req, res) => res.send('🟢 Bot Active'));
-    app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
-  } catch (error) {
-    console.error('Fatal error:', error);
+// 6. Web Server
+app.get('/', (req, res) => res.send('WhatsApp Bot Active'));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  startWhatsApp().catch(err => {
+    console.error('Failed to start WhatsApp:', err);
     process.exit(1);
-  }
-}
-
-bootstrap();
+  });
+});
