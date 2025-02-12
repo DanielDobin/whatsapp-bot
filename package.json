@@ -5,10 +5,8 @@
   "scripts": {
     "start": "node index.js"
   },
-{
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.5.3",
+    "@whiskeysockets/baileys": "^6.5.3", 
     "mongodb": "^6.3.0"
   }
-}
 }
