@@ -1,11 +1,10 @@
-// index.js
 const { makeWASocket, initAuthCreds } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Enhanced Logger
+// Enhanced logger with QR code display
 const logger = {
   trace: (...args) => console.log('[TRACE]', ...args),
   debug: (...args) => console.debug('[DEBUG]', ...args),
@@ -16,99 +15,88 @@ const logger = {
   child: () => logger
 };
 
-// 2. Fixed Session Handler
 async function useMongoDBAuthState(db) {
   const collection = db.collection('sessions');
   
-  // Delete existing sessions for fresh start
+  // Force fresh session for QR generation
   await collection.deleteMany({});
-
-  const result = await collection.findOne({ _id: 'auth' });
-  const existingData = result ? result : {};
-
-  // Initialize proper key structure
-  const defaultKeys = {
-    preKeys: [],
-    sessions: {},
-    signedPreKey: {
-      keyPair: {
-        public: Buffer.alloc(0),
-        private: Buffer.alloc(0)
-      }
-    },
-    registrationId: 0
-  };
-
+  
+  const result = await collection.findOne({ _id: 'auth' }) || {};
+  
   return {
     state: {
-      creds: existingData.creds || initAuthCreds(),
-      keys: existingData.keys || defaultKeys
+      creds: result.creds || initAuthCreds(),
+      keys: result.keys || {
+        preKeys: [],
+        sessions: {},
+        signedPreKey: {
+          keyPair: {
+            public: Buffer.from([0]),  // Critical fix
+            private: Buffer.from([0])  // Valid empty buffer
+          }
+        },
+        registrationId: 0
+      }
     },
     saveCreds: async (creds) => {
       await collection.updateOne(
         { _id: 'auth' },
-        { $set: { 
-          creds,
-          keys: { 
-            ...defaultKeys,
-            ...this.state.keys 
-          }
-        }},
+        { $set: { creds, keys: this.state.keys } },
         { upsert: true }
       );
-      logger.info('Session updated in MongoDB');
     }
   };
 }
 
-// 3. WhatsApp Connection
 async function connectToWhatsApp(db) {
-  try {
-    const { state, saveCreds } = await useMongoDBAuthState(db);
+  const { state, saveCreds } = await useMongoDBAuthState(db);
 
-    const sock = makeWASocket({
-      auth: state,
-      logger,
-      printQRInTerminal: false,
-      version: [2, 2413, 1],
-      browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
-      syncFullHistory: false,
-      generateInitialPreKeys: 5
-    });
+  const sock = makeWASocket({
+    auth: state,
+    logger,
+    printQRInTerminal: false,
+    browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
+    version: [2, 2413, 1],
+    syncFullHistory: false,
+    shouldSyncHistory: () => false,  // Prevent registration attempts
+    generateInitialPreKeys: 5
+  });
 
-    sock.ev.on('connection.update', (update) => {
-      if (update.qr) {
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
-        logger.info(`\n\n🔍 SCAN QR: ${qrUrl}\n`);
-      }
-      if (update.connection === 'open') {
-        logger.info('✅ WhatsApp authenticated');
-      }
-    });
+  // QR Code Handler
+  sock.ev.on('connection.update', (update) => {
+    logger.debug('Connection update:', update);
+    
+    if (update.qr) {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
+      logger.info(`\n\n🌐 SCAN THIS QR CODE: ${qrUrl}\n`);
+      logger.info(`RAW QR DATA: ${update.qr}\n`);  // Fallback for URL issues
+    }
+    
+    if (update.connection === 'open') {
+      logger.info('✅ WhatsApp authentication successful');
+    }
+  });
 
-    sock.ev.on('creds.update', saveCreds);
-    return sock;
-
-  } catch (error) {
-    logger.fatal('Connection failed:', error);
-    process.exit(1);
-  }
+  sock.ev.on('creds.update', saveCreds);
+  return sock;
 }
 
-// 4. Main Application
 async function main() {
-  const mongoClient = new MongoClient(process.env.MONGODB_URI, {
+  const client = new MongoClient(process.env.MONGODB_URI, {
     tls: true,
     serverSelectionTimeoutMS: 15000
   });
 
   try {
-    await mongoClient.connect();
-    const db = mongoClient.db('whatsapp');
+    await client.connect();
+    const db = client.db('whatsapp');
     const sock = await connectToWhatsApp(db);
 
     app.get('/', (req, res) => res.send('Bot Active'));
-    app.listen(PORT, () => logger.info(`Server running on ${PORT}`));
+    app.listen(PORT, () => {
+      logger.info(`Server started on port ${PORT}`);
+      logger.info('Waiting for QR code scan...');
+    });
 
   } catch (error) {
     logger.fatal('Startup failed:', error);
@@ -116,5 +104,4 @@ async function main() {
   }
 }
 
-// 5. Start
 main();
